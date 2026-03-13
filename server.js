@@ -1,26 +1,46 @@
-require("dotenv").config();
-const express = require("express");
-const session = require("express-session");
-const { ImapFlow } = require("imapflow");
+require("dotenv").config()
 
-const app = express();
+const express = require("express")
+const session = require("express-session")
+const { ImapFlow } = require("imapflow")
+const { simpleParser } = require("mailparser")
+const app = express()
 
-app.set("view engine", "ejs");
-app.use(express.urlencoded({ extended: true }));
+app.set("view engine", "ejs")
+app.use(express.urlencoded({ extended: true }))
 
 app.use(session({
-    secret: "karim-secret",
+    secret: "cmh9-secret",
     resave: false,
     saveUninitialized: false
-}));
+}))
 
-/* ===================================================== */
-/* HEADER PROCESSOR  (MATCH PYTHON VERSION 1:1) */
-/* ===================================================== */
+/* =========================================
+HTML → CLEAN TEXT
+========================================= */
 
-function processHeaders(rawEmail, options) {
+function htmlToText(html) {
 
-    const headersToRemove = [
+    html = html.replace(/<script[\s\S]*?<\/script>/gi, "")
+    html = html.replace(/<style[\s\S]*?<\/style>/gi, "")
+
+    html = html.replace(/<br\s*\/?>/gi, "\n")
+    html = html.replace(/<\/p>/gi, "\n")
+
+    html = html.replace(/<[^>]+>/g, "")
+
+    html = html.replace(/\n\s*\n+/g, "\n\n")
+
+    return html.trim()
+}
+
+/* =========================================
+HEADER CLEANER (Python logic)
+========================================= */
+
+function cleanHeaders(email, options) {
+
+    const headers_to_remove = [
         'Delivered-To',
         'ARC-Seal',
         'ARC-Message-Signature',
@@ -34,90 +54,78 @@ function processHeaders(rawEmail, options) {
         'X-Google-Smtp-Source'
     ];
 
-    const lines = rawEmail.split(/\r?\n/);
-    let cleaned = [];
+    const lines = email.split(/\r?\n/);
 
-    let skipSection = false;
+    let cleaned = [];
+    let skipBlock = false;
     let ccExists = false;
 
-    // detect CC existence
     for (let line of lines) {
-        if (/^Cc:/i.test(line)) {
+        if (/^Cc:/i.test(line))
             ccExists = true;
-        }
     }
 
     for (let line of lines) {
 
-        // ===== REMOVE HEADERS + MULTILINE =====
-        let headerMatch = headersToRemove.find(h =>
-            new RegExp("^" + h + ":", "i").test(line)
-        );
-
-        if (headerMatch) {
-            skipSection = true;
+        if (/^(Delivered-To:|ARC-|DKIM-Signature:|X-Received:|X-Google-Smtp-Source:|Authentication-Results:|Received-SPF:|Return-Path:|Sender:)/i.test(line)) {
+            skipBlock = true;
             continue;
         }
 
-        if (skipSection) {
+        if (skipBlock) {
+
             if (/^[A-Za-z-]+:/.test(line)) {
-                skipSection = false;
+                skipBlock = false;
             } else {
                 continue;
             }
+
         }
 
-        // ===== DATE =====
         if (/^Date:/i.test(line)) {
             cleaned.push("Date: [DATE]");
             continue;
         }
 
-        // ===== MESSAGE-ID =====
         if (/^Message-ID:/i.test(line)) {
 
             let match = line.match(/<([^>]+)>/);
 
             if (match) {
-                let msgId = match[1];
 
-                if (msgId.includes("@")) {
-                    let eidValue = options.eid || "[EID]";
-                    msgId = msgId.replace("@", `${eidValue}@`);
-                }
+                let msg = match[1];
 
-                cleaned.push(`Message-ID: <${msgId}>`);
+                if (msg.includes("@"))
+                    msg = msg.replace("@", (options.eid || "[EID]") + "@");
+
+                cleaned.push(`Message-ID: <${msg}>`);
                 continue;
             }
         }
 
-        // ===== FROM (replace domain only) =====
         if (/^From:/i.test(line)) {
-
-            let modified = line;
 
             let match = line.match(/<([^@>]+)@([^>]+)>/);
 
             if (match) {
+
                 let local = match[1];
-                let newDomain = options.domain || "[RDNS]";
-                modified = line.replace(
+                let domain = options.domain || "[RP]";
+
+                line = line.replace(
                     /<([^@>]+)@([^>]+)>/,
-                    `<${local}@${newDomain}>`
+                    `<${local}@${domain}>`
                 );
             }
 
-            cleaned.push(modified);
+            cleaned.push(line);
 
-            // add Sender under From
-            if (options.addSender) {
-                cleaned.push(`Sender: noreply@${options.domain || "[RDNS]"}`);
-            }
+            if (options.addSender)
+                cleaned.push(`Sender: noreply@${options.domain || "[RP]"}`);
 
             continue;
         }
 
-        // ===== TO =====
         if (/^To:/i.test(line)) {
 
             cleaned.push("To: [*to]");
@@ -136,43 +144,88 @@ function processHeaders(rawEmail, options) {
     return cleaned.join("\n");
 }
 
-/* ===================================================== */
-/* ROUTES */
-/* ===================================================== */
+/* =========================================
+EXTRACT JUST TEXT (Python-like logic)
+========================================= */
 
-app.get("/", (req, res) => {
-    res.render("access", { error: null });
-});
+function extractJustText(raw) {
 
-app.post("/access", (req, res) => {
-    const { code } = req.body;
+    // نقسم headers / body
+    const parts = raw.split(/\r?\n\r?\n/);
+    if (parts.length < 2) return "";
 
-    if (code === process.env.ACCESS_CODE) {
-        req.session.authorized = true;
-        return res.redirect("/dashboard");
+    let body = parts.slice(1).join("\n\n");
+
+    // نحاول نلقى text/plain
+    let plainMatch = body.match(/Content-Type:\s*text\/plain[\s\S]*?\r?\n\r?\n([\s\S]*?)(--|$)/i);
+
+    if (plainMatch) {
+        return plainMatch[1].trim();
     }
 
-    res.render("access", { error: "Wrong Access Code" });
-});
+    // إذا ما كانش plain نحاول html
+    let htmlMatch = body.match(/Content-Type:\s*text\/html[\s\S]*?\r?\n\r?\n([\s\S]*?)(--|$)/i);
+
+    if (htmlMatch) {
+
+        let html = htmlMatch[1];
+
+        html = html.replace(/<script[\s\S]*?<\/script>/gi, "");
+        html = html.replace(/<style[\s\S]*?<\/style>/gi, "");
+        html = html.replace(/<br\s*\/?>/gi, "\n");
+        html = html.replace(/<\/p>/gi, "\n");
+        html = html.replace(/<[^>]+>/g, "");
+        html = html.replace(/\n\s*\n+/g, "\n\n");
+
+        return html.trim();
+    }
+
+    return "";
+}
+/* =========================================
+ROUTES
+========================================= */
+
+app.get("/", (req, res) => {
+
+    res.render("access", { error: null })
+
+})
+
+app.post("/access", (req, res) => {
+
+    if (req.body.code === process.env.ACCESS_CODE) {
+
+        req.session.auth = true
+        return res.redirect("/dashboard")
+
+    }
+
+    res.render("access", { error: "Wrong Code" })
+
+})
 
 app.get("/dashboard", (req, res) => {
-    if (!req.session.authorized) return res.redirect("/");
+
+    if (!req.session.auth)
+        return res.redirect("/")
 
     res.render("extractor", {
         labels: [],
         error: null,
-        email: req.session.email || "",
-        password: req.session.password || ""
-    });
-});
+        email: "",
+        password: ""
+    })
 
-/* ================= CONNECT ================= */
+})
+
+/* =========================================
+CONNECT
+========================================= */
 
 app.post("/connect", async (req, res) => {
 
-    if (!req.session.authorized) return res.redirect("/");
-
-    const { email, password } = req.body;
+    const { email, password } = req.body
 
     try {
 
@@ -181,24 +234,25 @@ app.post("/connect", async (req, res) => {
             port: 993,
             secure: true,
             auth: { user: email, pass: password }
-        });
+        })
 
-        await client.connect();
+        await client.connect()
 
-        let mailboxes = await client.list();
-        let labels = mailboxes.map(box => box.path);
+        let boxes = await client.list()
 
-        await client.logout();
+        let labels = boxes.map(b => b.path)
 
-        req.session.email = email;
-        req.session.password = password;
+        await client.logout()
+
+        req.session.email = email
+        req.session.password = password
 
         res.render("extractor", {
             labels,
             error: null,
             email,
             password
-        });
+        })
 
     } catch (err) {
 
@@ -207,77 +261,127 @@ app.post("/connect", async (req, res) => {
             error: "Connection Failed",
             email,
             password
-        });
+        })
     }
-});
 
-/* ================= EXTRACT ================= */
+})
+
+/* =========================================
+EXTRACT
+========================================= */
 
 app.post("/extract", async (req, res) => {
 
     try {
 
-        const { email, password, label, start, limit } = req.body;
+        const { email, password, label, start, limit, mode } = req.body
 
         const client = new ImapFlow({
             host: "imap.gmail.com",
             port: 993,
             secure: true,
             auth: { user: email, pass: password }
-        });
+        })
 
-        await client.connect();
-        let lock = await client.getMailboxLock(label);
+        await client.connect()
 
-        let startNum = parseInt(start);
-        let endNum = startNum + parseInt(limit) - 1;
+        let lock = await client.getMailboxLock(label)
 
-        let results = [];
+        let startNum = parseInt(start)
+        let endNum = startNum + parseInt(limit) - 1
+
+        let results = []
 
         for await (let msg of client.fetch(`${startNum}:${endNum}`, { source: true })) {
 
-            let raw = msg.source.toString();
+            let raw = msg.source.toString()
 
-            let cleaned = processHeaders(raw, {
-                domain: req.body.domain,
-                eid: req.body.eid,
-                addSender: !!req.body.addSender
-            });
+            /* BODY TEXT MODE */
 
-            results.push(cleaned);
+            /* JUST TEXT MODE */
+
+            /* JUST TEXT MODE */
+
+            if (mode === "justtext") {
+
+    try {
+
+        const parsed = await simpleParser(raw)
+
+        let text = parsed.text || ""
+
+        if (!text && parsed.html)
+            text = htmlToText(parsed.html)
+
+        if (text && text.trim().length > 0)
+            results.push(text.trim())
+
+    } catch (e) {
+        console.log("JUSTTEXT ERROR:", e)
+
+    }
+
+}
+            /* CLEAN HEADERS */
+
+            else if (mode === "clean") {
+
+                let cleaned = cleanHeaders(raw, {
+                    domain: req.body.domain,
+                    eid: req.body.eid,
+                    addSender: req.body.addSender
+                })
+
+                results.push(cleaned)
+            }
         }
 
-        lock.release();
-        await client.logout();
+        lock.release()
+        await client.logout()
 
-        if (results.length === 0) {
-            throw new Error("No emails found.");
-        }
+        if (results.length === 0)
+            throw new Error("No emails found")
 
-        let finalFile = results.join("\n__SEP__\n");
+        let finalFile = results.join("\n__SEP__\n")
 
-        res.setHeader("Content-Disposition", "attachment; filename=merged_emails.txt");
-        res.setHeader("Content-Type", "text/plain");
+        res.setHeader(
+            "Content-Disposition",
+            "attachment; filename=merged_emails.txt"
+        )
 
-        res.send(finalFile);
+        res.setHeader("Content-Type", "text/plain")
+
+        res.send(finalFile)
 
     } catch (err) {
-        console.error(err);
-        res.send("❌ Extraction Failed: " + err.message);
-    }
-});
 
-/* ================= LOGOUT ================= */
+        console.log(err)
+
+        res.send("❌ Extraction Failed")
+
+    }
+
+})
+
+/* =========================================
+LOGOUT
+========================================= */
 
 app.get("/logout", (req, res) => {
-    req.session.destroy();
-    res.redirect("/");
-});
 
-/* ================= SERVER ================= */
+    req.session.destroy()
+    res.redirect("/")
 
-const PORT = process.env.PORT || 3000;
+})
+
+/* =========================================
+SERVER
+========================================= */
+
+const PORT = process.env.PORT || 3000
 
 app.listen(PORT, () => {
-    console.log("🔥 Running on port " + PORT);
-});
+
+    console.log("🔥 CMH9 Extractor running on port " + PORT)
+
+})

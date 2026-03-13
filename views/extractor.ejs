@@ -2,15 +2,14 @@
 <html lang="en">
 
 <head>
-    <title>Email Extractor Pro</title>
+    <title>Email Extraction CMH9</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
     <style>
         body {
             background: linear-gradient(135deg, #e3f2fd, #ffffff);
-            transition: 0.3s ease;
+            transition: 0.3s;
         }
 
         body.dark-mode {
@@ -20,8 +19,7 @@
 
         .card-custom {
             border-radius: 20px;
-            backdrop-filter: blur(15px);
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
             border: none;
         }
@@ -29,15 +27,6 @@
         body.dark-mode .card-custom {
             background: rgba(30, 41, 59, 0.95);
             color: white;
-        }
-
-        .btn-primary {
-            background: #0d6efd;
-            border: none;
-        }
-
-        .btn-primary:hover {
-            background: #0b5ed7;
         }
 
         .btn-extract {
@@ -53,10 +42,6 @@
         .form-control {
             border-radius: 10px;
         }
-
-        .mode-toggle {
-            cursor: pointer;
-        }
     </style>
 </head>
 
@@ -66,16 +51,14 @@
 
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h3 class="fw-bold">📧 Email Extraction CMH9</h3>
-            <button onclick="toggleDarkMode()" class="btn btn-outline-primary mode-toggle">
-                🌙  Mode
-            </button>
+            <button onclick="toggleDarkMode()" class="btn btn-outline-primary">🌙 Mode</button>
         </div>
 
         <div class="card card-custom p-4">
 
             <form method="POST">
 
-                <!-- CONNECT LINE -->
+                <!-- CONNECT -->
                 <div class="row g-3 align-items-end mb-4">
                     <div class="col-md-4">
                         <label>Email</label>
@@ -89,18 +72,13 @@
                     </div>
 
                     <div class="col-md-4">
-                        <button formaction="/connect" class="btn btn-primary w-100">
-                            🔵 Connect
-                        </button>
+                        <button formaction="/connect" class="btn btn-primary w-100">🔵 Connect</button>
                     </div>
                 </div>
 
                 <hr>
 
-                <!-- EXTRACTION SETTINGS -->
-
                 <div class="row g-3">
-
                     <div class="col-md-4">
                         <label>Label</label>
                         <select name="label" class="form-control">
@@ -125,39 +103,51 @@
                         <label>Limit</label>
                         <input type="number" name="limit" value="10" class="form-control">
                     </div>
-
                 </div>
 
+                <!-- RADIO MODES -->
                 <div class="mt-4">
-                    <label>Download Mode</label>
-                    <select name="mode" id="modeSelect" class="form-control">
-                        <option value="newsletter">Download Newsletter</option>
-                        <option value="original">Download Original (Raw)</option>
-                        <option value="original_clean">Original Clean (Modify Headers)</option>
-                    </select>
+                    <label class="fw-bold mb-2">Download Mode</label>
+
+                    <div class="d-flex gap-4">
+
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="mode" value="clean" checked>
+                            <label class="form-check-label">News Clean Headers</label>
+                        </div>
+
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="mode" value="justtext">
+                            <label class="form-check-label">Just Text Only</label>
+                        </div>
+
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="mode" value="original">
+                            <label class="form-check-label">Newsletter Original</label>
+                        </div>
+
+
+
+                    </div>
                 </div>
 
                 <!-- CLEAN OPTIONS -->
-
                 <div id="cleanOptions" style="display:none;" class="mt-4">
 
                     <div class="card p-3 bg-light border-0">
-                        <h5 class="mb-3">Header Modification Options</h5>
+                        <h5>Header Modification Options</h5>
 
                         <div class="row g-3">
-
                             <div class="col-md-6">
                                 <label>Domain Replacement</label>
-                                <input name="domain" class="form-control" placeholder="example.com">
+                                <input name="domain" class="form-control" value="[RP]">
                             </div>
 
                             <div class="col-md-6">
-                                <label>Message-ID Tag (Before @)</label>
-                                <input name="eid" class="form-control" placeholder="[EID]">
+                                <label>Message-ID Tag</label>
+                                <input name="eid" class="form-control" value="[EID]">
                             </div>
-
                         </div>
-
                         <hr class="my-4">
 
                         <div class="row">
@@ -223,47 +213,42 @@
                             </div>
 
                         </div>
+
                     </div>
                 </div>
+                <button formaction="/extract" class="btn btn-extract w-100 mt-4">🚀 Start Extraction</button>
+
+            </form>
+
+            <a href="/logout" class="btn btn-outline-danger mt-3 w-100">Logout</a>
+
+            <% if (error) { %>
+                <p class="text-danger mt-3">
+                    <%= error %>
+                </p>
+                <% } %>
+
+                    <div class="text-center mt-5 pt-4 border-top">
+                        <p class="fw-semibold">CMH9 Team</p>
+                        <a href="https://t.me/karim_rachmoun" target="_blank" class="fw-bold text-decoration-none">
+                            🔵 Telegram: @karim_rachmoun
+                        </a>
+                    </div>
 
         </div>
-
-        <button formaction="/extract" class="btn btn-extract w-100 mt-4 py-2">
-            🚀 Start Extraction
-        </button>
-
-        </form>
-
-        <a href="/logout" class="btn btn-outline-danger mt-3 w-100">Logout</a>
-
-        <% if (error) { %>
-            <p class="text-danger mt-3">
-                <%= error %>
-            </p>
-            <% } %>
-
-            <div class="text-center mt-5 pt-4 border-top">
-    <p class="mb-1 fw-semibold">CMH9 Team</p>
-    <a href="https://t.me/karim_rachmoun" target="_blank" 
-       class="text-decoration-none fw-bold">
-        🔵 Telegram: @karim_rachmoun
-    </a>
-</div>
     </div>
-    </div>
-    
 
     <script>
-        const modeSelect = document.getElementById("modeSelect");
+        const radios = document.querySelectorAll("input[name='mode']");
         const cleanOptions = document.getElementById("cleanOptions");
 
-        function toggleCleanOptions() {
-            cleanOptions.style.display =
-                modeSelect.value === "original_clean" ? "block" : "none";
+        function toggleClean() {
+            const selected = document.querySelector("input[name='mode']:checked").value;
+            cleanOptions.style.display = selected === "clean" ? "block" : "none";
         }
 
-        modeSelect.addEventListener("change", toggleCleanOptions);
-        toggleCleanOptions();
+        radios.forEach(r => r.addEventListener("change", toggleClean));
+        toggleClean();
 
         function toggleDarkMode() {
             document.body.classList.toggle("dark-mode");

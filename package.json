@@ -1,27 +1,17 @@
 {
+  "name": "cmh9-extractor",
+  "version": "1.0.0",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
-  }
-}
-{
-  "name": "email-extractor",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "dotenv": "^17.3.1",
-    "ejs": "^4.0.1",
-    "express": "^5.2.1",
+    "ejs": "^3.1.10",
+    "express": "^4.22.1",
     "express-session": "^1.19.0",
-    "imapflow": "^1.2.10",
-    "mailparser": "^3.9.3",
-    "socket.io": "^4.8.3"
+    "imapflow": "^1.2.12",
+    "mailparser": "^3.9.3"
   }
 }
+
