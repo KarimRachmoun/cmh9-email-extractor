@@ -4,6 +4,7 @@ const express = require("express")
 const session = require("express-session")
 const { ImapFlow } = require("imapflow")
 const { simpleParser } = require("mailparser")
+
 const app = express()
 
 app.set("view engine", "ejs")
@@ -35,12 +36,12 @@ function htmlToText(html) {
 }
 
 /* =========================================
-HEADER CLEANER (Python logic)
+HEADER CLEANER (Improved Python Logic)
 ========================================= */
 
-function cleanHeaders(email, options) {
+function cleanHeaders(email, options = {}) {
 
-    const headers_to_remove = [
+    const removeHeaders = [
         'Delivered-To',
         'ARC-Seal',
         'ARC-Message-Signature',
@@ -52,136 +53,121 @@ function cleanHeaders(email, options) {
         'Sender',
         'X-Received',
         'X-Google-Smtp-Source'
-    ];
+    ]
 
-    const lines = email.split(/\r?\n/);
+    const domain = options.domain || "[RDNS]"
+    const eid = options.eid || "[EID]"
 
-    let cleaned = [];
-    let skipBlock = false;
-    let ccExists = false;
+    const lines = email.split(/\r?\n/)
 
+    let cleaned = []
+    let skip = false
+    let ccExists = false
+
+    // check if cc exists
     for (let line of lines) {
         if (/^Cc:/i.test(line))
-            ccExists = true;
+            ccExists = true
     }
 
     for (let line of lines) {
 
-        if (/^(Delivered-To:|ARC-|DKIM-Signature:|X-Received:|X-Google-Smtp-Source:|Authentication-Results:|Received-SPF:|Return-Path:|Sender:)/i.test(line)) {
-            skipBlock = true;
-            continue;
+        // remove unwanted headers
+        if (removeHeaders.some(h => line.toLowerCase().startsWith(h.toLowerCase() + ":"))) {
+            skip = true
+            continue
         }
 
-        if (skipBlock) {
-
-            if (/^[A-Za-z-]+:/.test(line)) {
-                skipBlock = false;
-            } else {
-                continue;
-            }
-
+        // skip multiline header continuation
+        if (skip) {
+            if (/^\s/.test(line))
+                continue
+            skip = false
         }
 
+        // Date
         if (/^Date:/i.test(line)) {
-            cleaned.push("Date: [DATE]");
-            continue;
+            cleaned.push("Date: [DATE]")
+            continue
         }
 
+        // Message-ID
         if (/^Message-ID:/i.test(line)) {
 
-            let match = line.match(/<([^>]+)>/);
+            let match = line.match(/<([^>]+)>/)
 
             if (match) {
 
-                let msg = match[1];
+                let msg = match[1]
 
                 if (msg.includes("@"))
-                    msg = msg.replace("@", (options.eid || "[EID]") + "@");
+                    msg = msg.replace("@", eid + "@")
 
-                cleaned.push(`Message-ID: <${msg}>`);
-                continue;
+                cleaned.push(`Message-ID: <${msg}>`)
+                continue
             }
         }
 
-        if (/^From:/i.test(line)) {
+        // From
+       if (/^From:/i.test(line)) {
 
-            let match = line.match(/<([^@>]+)@([^>]+)>/);
+    let domain = options.domain || "[RDNS]"
 
-            if (match) {
+    // email داخل <>
+    let angleMatch = line.match(/<([^@>]+)@([^>]+)>/)
 
-                let local = match[1];
-                let domain = options.domain || "[RP]";
+    if (angleMatch) {
 
-                line = line.replace(
-                    /<([^@>]+)@([^>]+)>/,
-                    `<${local}@${domain}>`
-                );
-            }
+        let local = angleMatch[1]
 
-            cleaned.push(line);
+        line = line.replace(
+            /<([^@>]+)@([^>]+)>/,
+            `<${local}@${domain}>`
+        )
 
-            if (options.addSender)
-                cleaned.push(`Sender: noreply@${options.domain || "[RP]"}`);
+    } else {
 
-            continue;
+        // email بدون <>
+        let emailMatch = line.match(/([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+)/)
+
+        if (emailMatch) {
+
+            let local = emailMatch[1]
+
+            line = line.replace(
+                /([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+)/,
+                `${local}@${domain}`
+            )
         }
+    }
 
+    cleaned.push(line)
+
+    if (options.addSender)
+        cleaned.push(`Sender: noreply@[RDNS]`)
+
+    continue
+}
+
+        // To
         if (/^To:/i.test(line)) {
 
-            cleaned.push("To: [*to]");
+            cleaned.push("To: [*to]")
 
             if (!ccExists) {
-                cleaned.push("Cc: [*to]");
-                ccExists = true;
+                cleaned.push("Cc: [*to]")
+                ccExists = true
             }
 
-            continue;
+            continue
         }
 
-        cleaned.push(line);
+        cleaned.push(line)
     }
 
-    return cleaned.join("\n");
+    return cleaned.join("\n")
 }
 
-/* =========================================
-EXTRACT JUST TEXT (Python-like logic)
-========================================= */
-
-function extractJustText(raw) {
-
-    // نقسم headers / body
-    const parts = raw.split(/\r?\n\r?\n/);
-    if (parts.length < 2) return "";
-
-    let body = parts.slice(1).join("\n\n");
-
-    // نحاول نلقى text/plain
-    let plainMatch = body.match(/Content-Type:\s*text\/plain[\s\S]*?\r?\n\r?\n([\s\S]*?)(--|$)/i);
-
-    if (plainMatch) {
-        return plainMatch[1].trim();
-    }
-
-    // إذا ما كانش plain نحاول html
-    let htmlMatch = body.match(/Content-Type:\s*text\/html[\s\S]*?\r?\n\r?\n([\s\S]*?)(--|$)/i);
-
-    if (htmlMatch) {
-
-        let html = htmlMatch[1];
-
-        html = html.replace(/<script[\s\S]*?<\/script>/gi, "");
-        html = html.replace(/<style[\s\S]*?<\/style>/gi, "");
-        html = html.replace(/<br\s*\/?>/gi, "\n");
-        html = html.replace(/<\/p>/gi, "\n");
-        html = html.replace(/<[^>]+>/g, "");
-        html = html.replace(/\n\s*\n+/g, "\n\n");
-
-        return html.trim();
-    }
-
-    return "";
-}
 /* =========================================
 ROUTES
 ========================================= */
@@ -288,41 +274,39 @@ app.post("/extract", async (req, res) => {
         let lock = await client.getMailboxLock(label)
 
         let startNum = parseInt(start)
-        let endNum = startNum + parseInt(limit) - 1
+        let limitNum = parseInt(limit)
 
         let results = []
 
-        for await (let msg of client.fetch(`${startNum}:${endNum}`, { source: true })) {
+        let uids = await client.search({ all: true })
+
+        // newest first (like Gmail)
+        uids.reverse()
+
+        let selected = uids.slice(startNum - 1, startNum - 1 + limitNum)
+
+        if (selected.length === 0)
+            throw new Error("Start range too big")
+
+        for (let uid of selected) {
+
+            let msg = await client.fetchOne(uid, { source: true })
 
             let raw = msg.source.toString()
 
-            /* BODY TEXT MODE */
-
-            /* JUST TEXT MODE */
-
-            /* JUST TEXT MODE */
-
             if (mode === "justtext") {
 
-    try {
+                const parsed = await simpleParser(raw)
 
-        const parsed = await simpleParser(raw)
+                let text = parsed.text || ""
 
-        let text = parsed.text || ""
+                if (!text && parsed.html)
+                    text = htmlToText(parsed.html)
 
-        if (!text && parsed.html)
-            text = htmlToText(parsed.html)
+                if (text && text.trim())
+                    results.push(text.trim())
 
-        if (text && text.trim().length > 0)
-            results.push(text.trim())
-
-    } catch (e) {
-        console.log("JUSTTEXT ERROR:", e)
-
-    }
-
-}
-            /* CLEAN HEADERS */
+            }
 
             else if (mode === "clean") {
 
@@ -333,13 +317,14 @@ app.post("/extract", async (req, res) => {
                 })
 
                 results.push(cleaned)
+
             }
         }
 
         lock.release()
         await client.logout()
 
-        if (results.length === 0)
+        if (!results.length)
             throw new Error("No emails found")
 
         let finalFile = results.join("\n__SEP__\n")
